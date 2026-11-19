@@ -2,11 +2,18 @@ name: Build and Release
 
 on:
   push:
+    branches:
+      - 'josh/management-panel'
     tags:
       - 'v*'
 
+concurrency:
+  group: panel-release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-release:
+    if: github.ref_type == 'tag' || github.repository == 'joshm1/Cli-Proxy-API-Management-Center'
     runs-on: ubuntu-latest
 
     permissions:
@@ -33,9 +40,14 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build all-in-one HTML
+        if: github.ref_type == 'tag'
         run: bun run build
         env:
           VERSION: ${{ github.ref_name }}
+
+      - name: Verify and build the fork panel
+        if: github.ref_type == 'branch'
+        run: VERSION="$(git describe --tags --match 'v[0-9]*' --abbrev=0)" bun run verify
 
       - name: Prepare release assets
         run: |
@@ -44,6 +56,7 @@ jobs:
           ls -lh management.html
 
       - name: Generate release notes
+        if: github.ref_type == 'tag'
         run: |
           set -euo pipefail
           current_tag="${GITHUB_REF_NAME}"
@@ -58,7 +71,8 @@ jobs:
           git log --pretty=format:"- %h %s" "${range}" >> release-notes.md
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/management.html
           body_path: release-notes.md
@@ -66,3 +80,24 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the fork panel
+        if: github.ref_type == 'branch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch_head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq .object.sha)"
+          if [[ "$branch_head" != "$GITHUB_SHA" ]]; then
+            echo "A newer commit is at the branch tip."
+            exit 0
+          fi
+
+          tag="josh-panel-${GITHUB_SHA:0:12}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/management.html --clobber
+            gh release edit "$tag" --latest
+          else
+            gh release create "$tag" dist/management.html --target "$GITHUB_SHA" --latest \
+              --title "Josh management panel (${GITHUB_SHA:0:12})" --notes "Built from $GITHUB_SHA."
+          fi
