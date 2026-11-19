@@ -1,0 +1,20 @@
+.github/workflows/release.yml
+  s_b91388d271fa66::t_d8bb3b228471a1 5-6,10-13,16,43,48-51,59,74,83-103
+  s_b91388d271fa66::t_e47d98ddf1ca88 75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "c6493697376dfae5d16317b8145d737052ece472",
+  "prompts": {},
+  "sessions": {
+    "s_b91388d271fa66": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f56e-dd63-7690-9e4d-08ef9467edfd",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Josh McDade <josh.ncsu@gmail.com>"
+    }
+  }
+}
