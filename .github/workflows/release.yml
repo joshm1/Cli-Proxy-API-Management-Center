@@ -6,6 +6,9 @@ on:
       - 'josh/management-panel'
     tags:
       - 'v*'
+  schedule:
+    - cron: '27 09 * * *'
+  workflow_dispatch:
 
 concurrency:
   group: panel-release-${{ github.ref }}
@@ -13,7 +16,10 @@ concurrency:
 
 jobs:
   build-and-release:
-    if: github.ref_type == 'tag' || github.repository == 'joshm1/Cli-Proxy-API-Management-Center'
+    if: >-
+      (github.repository != 'joshm1/Cli-Proxy-API-Management-Center' && github.ref_type == 'tag') ||
+      (github.repository == 'joshm1/Cli-Proxy-API-Management-Center' &&
+      github.ref == 'refs/heads/josh/management-panel')
     runs-on: ubuntu-latest
 
     permissions:
@@ -25,18 +31,29 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
+
+      - name: Merge the latest stable upstream release
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        id: sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/sync-upstream-panel.sh
 
       - name: Setup Node.js
+        if: steps.sync.outputs.skip != 'true'
         uses: actions/setup-node@v5
         with:
           node-version: '24'
 
       - name: Setup Bun
+        if: steps.sync.outputs.skip != 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.3'
 
       - name: Install dependencies
+        if: steps.sync.outputs.skip != 'true'
         run: bun install --frozen-lockfile
 
       - name: Build all-in-one HTML
@@ -46,10 +63,11 @@ jobs:
           VERSION: ${{ github.ref_name }}
 
       - name: Verify and build the fork panel
-        if: github.ref_type == 'branch'
+        if: github.ref_type == 'branch' && steps.sync.outputs.skip != 'true'
         run: VERSION="$(git describe --tags --match 'v[0-9]*' --abbrev=0)" bun run verify
 
       - name: Prepare release assets
+        if: steps.sync.outputs.skip != 'true'
         run: |
           cd dist
           mv index.html management.html
@@ -82,7 +100,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish the fork panel
-        if: github.ref_type == 'branch'
+        if: github.ref_type == 'branch' && steps.sync.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -93,11 +111,17 @@ jobs:
             exit 0
           fi
 
-          tag="josh-panel-${GITHUB_SHA:0:12}"
+          head="$(git rev-parse HEAD)"
+          if [[ "$head" != "$GITHUB_SHA" ]]; then
+            gh auth setup-git
+            git push --atomic origin "HEAD:$GITHUB_REF" "refs/tags/$SYNCED_UPSTREAM_TAG"
+          fi
+
+          tag="josh-panel-${head:0:12}"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" dist/management.html --clobber
             gh release edit "$tag" --latest
           else
-            gh release create "$tag" dist/management.html --target "$GITHUB_SHA" --latest \
-              --title "Josh management panel (${GITHUB_SHA:0:12})" --notes "Built from $GITHUB_SHA."
+            gh release create "$tag" dist/management.html --target "$head" --latest \
+              --title "Josh management panel (${head:0:12})" --notes "Built from $head."
           fi
